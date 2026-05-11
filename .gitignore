@@ -1,0 +1,28 @@
+# Runtime data (created by the app)
+lan_share_uploads/
+lan_share_pastes/
+lan_share_shared/
+
+# Legacy / tooling
+.DS_Store
+Thumbs.db
+
+# Build outputs
+/lanshare
+/lanshare.exe
+dist/
+*.exe
+
+# Tests / coverage
+coverage.out
+*.test
+
+# Editor / OS
+.idea/
+.vscode/
+*.swp
+*~
+
+# Secrets / local env
+.env
+.env.*
