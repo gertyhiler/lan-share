@@ -2,6 +2,7 @@
 lan_share_uploads/
 lan_share_pastes/
 lan_share_shared/
+lan_share_chat/
 
 # Legacy / tooling
 .DS_Store

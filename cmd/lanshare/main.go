@@ -16,6 +16,7 @@ import (
 	fsadapter "github.com/gertyhiler/lan-share/internal/adapter/fs"
 	httpadapter "github.com/gertyhiler/lan-share/internal/adapter/http"
 	"github.com/gertyhiler/lan-share/internal/platform/netutil"
+	chatuc "github.com/gertyhiler/lan-share/internal/usecase/chat"
 	fileuc "github.com/gertyhiler/lan-share/internal/usecase/files"
 	"github.com/gertyhiler/lan-share/internal/usecase/paste"
 )
@@ -40,16 +41,19 @@ func run() error {
 	uploads := filepath.Join(absRoot, "lan_share_uploads")
 	shared := filepath.Join(absRoot, "lan_share_shared")
 	pastes := filepath.Join(absRoot, "lan_share_pastes")
+	chatDir := filepath.Join(absRoot, "lan_share_chat")
 
 	pasteStore := &fsadapter.Pastes{Dir: pastes}
 	uploadStore := &fsadapter.Uploads{Dir: uploads}
 	sharedStore := &fsadapter.Shared{Dir: shared}
+	chatStore := &fsadapter.Chat{Dir: chatDir}
 
 	pasteSvc := paste.NewService(pasteStore)
 	filesSvc := fileuc.NewService(uploadStore, sharedStore)
+	chatSvc := chatuc.NewService(chatStore)
 
 	paths := httpadapter.Paths{Uploads: uploads, Shared: shared}
-	handler, err := httpadapter.NewHandler(pasteSvc, filesSvc, *port, paths, log.Default(), "lan-share/1.0")
+	handler, err := httpadapter.NewHandler(pasteSvc, filesSvc, chatSvc, *port, paths, log.Default(), "lan-share/1.0")
 	if err != nil {
 		return err
 	}
@@ -81,6 +85,7 @@ func run() error {
 	logger.Printf("- Uploads: %s", uploads)
 	logger.Printf("- Shared:  %s", shared)
 	logger.Printf("- Pastes:  %s", pastes)
+	logger.Printf("- Chat:    %s", chatDir)
 	logger.Printf("Ctrl+C to stop.")
 
 	errCh := make(chan error, 1)
@@ -119,9 +124,19 @@ func (w *logResponseWriter) WriteHeader(code int) {
 	w.ResponseWriter.WriteHeader(code)
 }
 
+func (w *logResponseWriter) Flush() {
+	if flusher, ok := w.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
+func (w *logResponseWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
+}
+
 func withRequestLog(l *log.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		lrw := &logResponseWriter{ResponseWriter: w, code: http.StatusOK}
+		lrw := &logResponseWriter{ResponseWriter: w}
 		next.ServeHTTP(lrw, r)
 		if lrw.code == 0 {
 			lrw.code = http.StatusOK

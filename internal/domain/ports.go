@@ -21,3 +21,11 @@ type SharedStore interface {
 	List(ctx context.Context) ([]FileEntry, error)
 	ReadFile(ctx context.Context, name string) ([]byte, error)
 }
+
+// ChatStore persists the append-only chat log and the LAN IP to device id map.
+type ChatStore interface {
+	AppendMessage(ctx context.Context, msg Message) error
+	RecentMessages(ctx context.Context, limit int) ([]Message, error)
+	DeviceIDForIP(ctx context.Context, ip string) (deviceID string, ok bool, err error)
+	SaveDeviceIDForIP(ctx context.Context, ip string, deviceID string) error
+}
