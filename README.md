@@ -57,11 +57,13 @@ go build -o lanshare ./cmd/lanshare
 
 ## Чат
 
-Главная страница теперь работает как один общий чат. Каждое устройство получает серверный `deviceId`: сервер нормализует IP из прямого `RemoteAddr`, сохраняет привязку в `lan_share_chat/devices.json` и выставляет `HttpOnly` cookie `lan_share_device`. JavaScript не читает и не отправляет `deviceId`; имя устройства используется только как отображаемая подпись.
+Главная страница теперь работает как один общий чат. Каждое устройство получает серверный `deviceId`: сервер нормализует IP из прямого `RemoteAddr`, сохраняет привязку в `lan_share_chat/devices.json` и выставляет `HttpOnly` cookie `lan_share_device`. JavaScript не читает и не отправляет `deviceId`; отображаемое имя генерируется сервером автоматически из `deviceId`.
 
 - `GET /api/chat/stream` — SSE-события `history`, `message`, `participants`
-- `POST /api/chat/messages` — JSON-сообщение с `text`, `displayName`, `attachments`
+- `POST /api/chat/messages` — JSON-сообщение с `text`, `attachments`
 - `POST /upload` с `Accept: application/json` — загрузка файлов для вложений, ответ `{"ok": true, "files": [...]}`
+
+Сообщения поддерживают безопасный Markdown-поднабор: ссылки, `**жирный**`, `*курсив*`, inline-команды через обратные кавычки и блоки кода. HTML в тексте не исполняется. Inline-команды копируются по клику. Изображения и видео из чат-вложений показываются прямо в сообщении, остальные файлы остаются скачиваемыми.
 
 Legacy API пасты оставлен для скриптов: `POST /paste`, `GET /api/paste/latest`.
 

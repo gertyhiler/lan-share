@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"fmt"
+	"hash/fnv"
 	"net/url"
 	"strings"
 	"time"
@@ -14,10 +15,39 @@ import (
 )
 
 const (
-	defaultDisplayName = "Устройство"
-	maxDisplayNameLen  = 48
-	maxMessageTextLen  = 16 << 10
+	maxDisplayNameLen = 48
+	maxMessageTextLen = 16 << 10
 )
+
+var deviceNameAdjectives = []string{
+	"Бодрый",
+	"Лунный",
+	"Шустрый",
+	"Секретный",
+	"Тёплый",
+	"Хитрый",
+	"Сонный",
+	"Искристый",
+	"Громкий",
+	"Пиксельный",
+	"Космический",
+	"Мятный",
+}
+
+var deviceNameNouns = []string{
+	"Тостер",
+	"Роутер",
+	"Пульт",
+	"Терминал",
+	"Диск",
+	"Монитор",
+	"Провод",
+	"Модем",
+	"Байт",
+	"Пакет",
+	"Буфер",
+	"Порт",
+}
 
 // Service owns chat message creation and storage.
 type Service struct {
@@ -58,7 +88,7 @@ func (s *Service) RecentMessages(ctx context.Context, limit int) ([]domain.Messa
 }
 
 // PostMessage validates, normalizes and appends a chat message.
-func (s *Service) PostMessage(ctx context.Context, deviceID string, displayName string, text string, attachments []domain.Attachment) (domain.Message, error) {
+func (s *Service) PostMessage(ctx context.Context, deviceID string, text string, attachments []domain.Attachment) (domain.Message, error) {
 	if !uuidutil.IsValid(deviceID) {
 		return domain.Message{}, fmt.Errorf("invalid device id")
 	}
@@ -77,7 +107,7 @@ func (s *Service) PostMessage(ctx context.Context, deviceID string, displayName 
 		ID:          id,
 		TS:          time.Now().UTC(),
 		DeviceID:    deviceID,
-		DisplayName: NormalizeDisplayName(displayName),
+		DisplayName: DeviceDisplayName(deviceID),
 		Text:        text,
 		Attachments: cleanAttachments,
 	}
@@ -87,13 +117,18 @@ func (s *Service) PostMessage(ctx context.Context, deviceID string, displayName 
 	return msg, nil
 }
 
-// NormalizeDisplayName keeps UI-provided display names small and presentable.
-func NormalizeDisplayName(name string) string {
-	name = strings.TrimSpace(limitString(name, maxDisplayNameLen))
-	if name == "" {
-		return defaultDisplayName
+// DeviceDisplayName returns a stable friendly name for a server-issued device id.
+func DeviceDisplayName(deviceID string) string {
+	if !uuidutil.IsValid(deviceID) {
+		return "Локальное устройство"
 	}
-	return name
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(deviceID))
+	sum := h.Sum32()
+	adj := deviceNameAdjectives[int(sum)%len(deviceNameAdjectives)]
+	noun := deviceNameNouns[int(sum/uint32(len(deviceNameAdjectives)))%len(deviceNameNouns)]
+	name := adj + " " + noun
+	return strings.TrimSpace(limitString(name, maxDisplayNameLen))
 }
 
 func normalizeAttachments(in []domain.Attachment) []domain.Attachment {

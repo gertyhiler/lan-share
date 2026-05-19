@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -100,12 +101,12 @@ func (h *chatHub) broadcast(event string, data any) {
 	}
 }
 
-func (h *chatHub) touch(deviceID string, displayName string) []domain.Participant {
+func (h *chatHub) touch(deviceID string) []domain.Participant {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.participants[deviceID] = domain.Participant{
 		DeviceID:    deviceID,
-		DisplayName: chatsvc.NormalizeDisplayName(displayName),
+		DisplayName: chatsvc.DeviceDisplayName(deviceID),
 		LastSeen:    time.Now().UTC(),
 	}
 	return h.participantsLocked()
@@ -415,7 +416,6 @@ func (h *Handler) handleAPIShared(w http.ResponseWriter, r *http.Request) {
 }
 
 type chatMessageRequest struct {
-	DisplayName string              `json:"displayName"`
 	Text        string              `json:"text"`
 	Attachments []domain.Attachment `json:"attachments"`
 }
@@ -435,13 +435,13 @@ func (h *Handler) handleChatMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	msg, err := h.chat.PostMessage(r.Context(), ident.DeviceID, req.DisplayName, req.Text, req.Attachments)
+	msg, err := h.chat.PostMessage(r.Context(), ident.DeviceID, req.Text, req.Attachments)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
 
-	participants := h.hub.touch(ident.DeviceID, msg.DisplayName)
+	participants := h.hub.touch(ident.DeviceID)
 	h.hub.broadcast("message", msg)
 	h.hub.broadcast("participants", participants)
 	writeJSON(w, http.StatusCreated, map[string]any{"ok": true, "message": msg})
@@ -461,11 +461,10 @@ func (h *Handler) handleChatStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	displayName := r.URL.Query().Get("displayName")
 	events, unsubscribe := h.hub.subscribe()
 	defer unsubscribe()
 
-	participants := h.hub.touch(ident.DeviceID, displayName)
+	participants := h.hub.touch(ident.DeviceID)
 	h.hub.broadcast("participants", participants)
 
 	history, err := h.chat.RecentMessages(r.Context(), chatHistoryLen)
@@ -548,7 +547,7 @@ func (h *Handler) handleDownloadUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	safe := pathutil.SafeFilename(name)
-	sendAttachment(w, safe, data)
+	sendUpload(w, safe, data)
 }
 
 func (h *Handler) handleDownloadShared(w http.ResponseWriter, r *http.Request) {
@@ -572,12 +571,70 @@ func (h *Handler) handleDownloadShared(w http.ResponseWriter, r *http.Request) {
 	sendAttachment(w, safe, data)
 }
 
+func sendUpload(w http.ResponseWriter, filename string, data []byte) {
+	contentType := mime.TypeByExtension(strings.ToLower(filepath.Ext(filename)))
+	if contentType == "" {
+		contentType = http.DetectContentType(data)
+	}
+	if isInlineMedia(filename, contentType) {
+		contentType = mediaContentType(filename, contentType)
+		w.Header().Set("Content-Type", contentType)
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`inline; filename=%q`, filename))
+		w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(data)
+		return
+	}
+	sendAttachment(w, filename, data)
+}
+
 func sendAttachment(w http.ResponseWriter, filename string, data []byte) {
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename=%q`, filename))
 	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(data)
+}
+
+func isInlineMedia(filename string, contentType string) bool {
+	if strings.HasPrefix(contentType, "image/") || strings.HasPrefix(contentType, "video/") {
+		return true
+	}
+	switch strings.ToLower(filepath.Ext(filename)) {
+	case ".avif", ".gif", ".jpg", ".jpeg", ".png", ".webp",
+		".m4v", ".mov", ".mp4", ".ogv", ".webm":
+		return true
+	default:
+		return false
+	}
+}
+
+func mediaContentType(filename string, contentType string) string {
+	if strings.HasPrefix(contentType, "image/") || strings.HasPrefix(contentType, "video/") {
+		return contentType
+	}
+	switch strings.ToLower(filepath.Ext(filename)) {
+	case ".avif":
+		return "image/avif"
+	case ".gif":
+		return "image/gif"
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".png":
+		return "image/png"
+	case ".webp":
+		return "image/webp"
+	case ".m4v", ".mp4":
+		return "video/mp4"
+	case ".mov":
+		return "video/quicktime"
+	case ".ogv":
+		return "video/ogg"
+	case ".webm":
+		return "video/webm"
+	default:
+		return contentType
+	}
 }
 
 func (h *Handler) handlePaste(w http.ResponseWriter, r *http.Request) {
