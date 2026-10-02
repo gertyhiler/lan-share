@@ -2,85 +2,93 @@
 
 [![CI](https://github.com/gertyhiler/lan-share/actions/workflows/ci.yml/badge.svg)](https://github.com/gertyhiler/lan-share/actions/workflows/ci.yml)
 
-Минимальный офлайн-сервис для локалки: общий чат устройств и передача файлов между ними через браузер (без интернета). Реализация на **Go** (слои: `domain` → `usecase` → `adapter`).
+A small browser-based chat for sharing text and files between devices on the same
+local network. I use it daily to move things between my work and personal laptops.
+Run one Go binary, open its LAN address on another device, and share. No internet
+connection or client installation is needed at runtime.
 
-Сервис рассчитан на **доверенную LAN**, не на публикацию в интернет. См. [SECURITY.md](SECURITY.md).
+Designed for a **trusted LAN**, not the public internet. Read [SECURITY.md](SECURITY.md)
+for the access boundary. The current browser interface is in Russian.
 
-## Установка
+## Install and run
 
-Требуется Go 1.22+.
+Requires Go 1.22 or newer to install from source:
 
-```bash
+```sh
 go install github.com/gertyhiler/lan-share/cmd/lanshare@latest
 ```
 
-После установки бинарник `lanshare` окажется в `$GOPATH/bin` (или в `$(go env GOPATH)/bin`). При другом модуле форка замените путь в команде и в `go.mod` — см. [CONTRIBUTING.md](CONTRIBUTING.md).
+The binary is installed in `$GOPATH/bin`, or `$(go env GOPATH)/bin` by default.
+Make sure that directory is on your PATH. Choose where local chat and files live:
 
-## Запуск
-
-Из корня репозитория (чтобы каталоги `lan_share_*` создались рядом с проектом):
-
-```bash
-go run ./cmd/lanshare --host 0.0.0.0 --port 8000
+```sh
+mkdir -p ~/lan-share-data
+lanshare --host 0.0.0.0 --port 8000 --root ~/lan-share-data
 ```
 
-Сборка бинарника:
+Open the LAN URL printed by the server on each device, for example
+`http://192.168.1.10:8000/`. Devices must be on a network that permits them to reach
+the host. If it does not open, check the host firewall and network isolation.
+Stop the server with Ctrl-C.
 
-```bash
-go build -o lanshare ./cmd/lanshare
-./lanshare --host 0.0.0.0 --port 8000
+For a local-only development session, bind to `127.0.0.1` instead. `--root` defaults
+to the current working directory; the default listener is `0.0.0.0:8000`.
+
+## What it does
+
+- One shared chat with live messages and participants through SSE.
+- Text, file attachments, and inline previews for image/video attachments.
+- A limited Markdown subset: links, bold, italic, inline code and fenced code.
+  Message HTML is not executed; inline code can be copied by clicking it.
+- Shared-file and paste endpoints for small local scripts.
+
+The server associates devices with their direct connection IP and sets an
+HttpOnly cookie. Names are generated from the server-side device ID. This is a
+convenience identity for the LAN chat, not user authentication. IP changes or
+shared addresses can affect identity.
+
+## Local data
+
+The server creates these directories under `--root`:
+
+| Directory | Contents |
+| --- | --- |
+| `lan_share_uploads/` | Uploaded files and chat attachments |
+| `lan_share_shared/` | Files placed here for sharing on the LAN |
+| `lan_share_pastes/` | Saved pastes, including `latest.txt` |
+| `lan_share_chat/` | Chat history and device/IP mapping |
+
+These are runtime data, not source files. Keep them out of Git and choose a
+storage directory appropriate for the material you share.
+
+## HTTP integration
+
+- `GET /api/chat/stream` — SSE events: `history`, `message`, `participants`.
+- `POST /api/chat/messages` — JSON with `text` and `attachments`.
+- `POST /upload` with `Accept: application/json` — attachment upload, returning
+  `{"ok": true, "files": [...]}`.
+- `POST /paste`, `GET /api/paste/latest` — legacy paste API retained for scripts.
+
+## Development
+
+```sh
+git clone https://github.com/gertyhiler/lan-share.git
+cd lan-share
+go run ./cmd/lanshare --host 127.0.0.1 --port 8000
+go vet ./...
+go test ./... -race
 ```
 
-Флаг `--root` задаёт каталог, в котором создаются `lan_share_uploads`, `lan_share_shared`, `lan_share_pastes`, `lan_share_chat` (по умолчанию текущая рабочая директория).
+Build a binary with `go build -o lanshare ./cmd/lanshare`.
 
-Открой на другом устройстве в той же сети:
+The Go implementation separates domain contracts, use cases and adapters:
 
-- `http://<LAN-IP>:8000/`
+| Responsibility | Location |
+| --- | --- |
+| Domain entities and storage contracts | `internal/domain` |
+| Chat, file and paste operations | `internal/usecase` |
+| Filesystem storage and HTTP interface | `internal/adapter` |
+| Configuration and application wiring | `cmd/lanshare` |
 
-## Слои проекта
-
-| Слой     | Пакет                                          | Назначение                   |
-| -------- | ---------------------------------------------- | ---------------------------- |
-| Domain   | `internal/domain`                              | сущности, контракты хранилищ |
-| Use case | `internal/usecase/...`                         | сценарии: чат, паста, файлы  |
-| Adapters | `internal/adapter/fs`, `internal/adapter/http` | диск и HTTP                  |
-| Вход     | `cmd/lanshare`                                 | флаги, DI, HTTP-сервер       |
-
-## Что куда кладётся
-
-- Файлы, загруженные с других устройств → `lan_share_uploads/`
-- Файлы для раздачи в LAN → `lan_share_shared/`
-- История чата и привязка LAN IP → device id → `lan_share_chat/`
-- Текстовые пасты → `lan_share_pastes/` (последняя версия ещё в `lan_share_pastes/latest.txt`)
-
-Эти каталоги создаются при работе и **не должны коммититься** (см. `.gitignore`).
-
-## Чат
-
-Главная страница теперь работает как один общий чат. Каждое устройство получает серверный `deviceId`: сервер нормализует IP из прямого `RemoteAddr`, сохраняет привязку в `lan_share_chat/devices.json` и выставляет `HttpOnly` cookie `lan_share_device`. JavaScript не читает и не отправляет `deviceId`; отображаемое имя генерируется сервером автоматически из `deviceId`.
-
-- `GET /api/chat/stream` — SSE-события `history`, `message`, `participants`
-- `POST /api/chat/messages` — JSON-сообщение с `text`, `attachments`
-- `POST /upload` с `Accept: application/json` — загрузка файлов для вложений, ответ `{"ok": true, "files": [...]}`
-
-Сообщения поддерживают безопасный Markdown-поднабор: ссылки, `**жирный**`, `*курсив*`, inline-команды через обратные кавычки и блоки кода. HTML в тексте не исполняется. Inline-команды копируются по клику. Изображения и видео из чат-вложений показываются прямо в сообщении, остальные файлы остаются скачиваемыми.
-
-Legacy API пасты оставлен для скриптов: `POST /paste`, `GET /api/paste/latest`.
-
-## Полезные команды
-
-Узнать LAN IP на macOS (часто Wi‑Fi — `en0`):
-
-```bash
-ipconfig getifaddr en0
-```
-
-Если клиент не открывает страницу — проверьте, что фаервол не блокирует входящие на выбранный порт.
-
-## Участие и лицензия
-
-- [CONTRIBUTING.md](CONTRIBUTING.md) — как собирать, тестировать и слать PR.
-- [LICENSE](LICENSE) — MIT.
-- Уязвимости: [SECURITY.md](SECURITY.md).
-
-Форк: замените `module` в `go.mod` и префикс импортов на путь вашего репозитория, обновите бейдж CI и ссылку в [SECURITY.md](SECURITY.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md) for focused changes and fork instructions.
+[MIT licensed](LICENSE).

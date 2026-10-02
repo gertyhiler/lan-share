@@ -30,4 +30,4 @@ The module is published as `github.com/gertyhiler/lan-share`. If you maintain a 
 
 ## Runtime data
 
-Directories `lan_share_uploads/`, `lan_share_shared/`, and `lan_share_pastes/` are local data created at runtime. Do not commit their contents; they are listed in `.gitignore`. If they were ever committed by mistake, remove them from Git history before going public.
+Directories `lan_share_uploads/`, `lan_share_shared/`, `lan_share_pastes/`, and `lan_share_chat/` are local data created at runtime. Do not commit their contents; they are listed in `.gitignore`. If they were ever committed by mistake, remove them from Git history before going public.
